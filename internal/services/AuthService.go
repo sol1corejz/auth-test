@@ -1,8 +1,8 @@
 package services
 
 import (
-	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/sol1corejz/auth/internal/models"
 	"golang.org/x/crypto/bcrypt"
@@ -11,12 +11,14 @@ import (
 
 type Claims struct {
 	jwt.RegisteredClaims
-	userID string
-	userIP string
+	UserID string `json:"userID"`
+	UserIP string `json:"userIP"`
 }
 
 const tokenExp = 30 * time.Minute
 const secretKey = "supersecretkey"
+
+var key = []byte("your-32-byte-long-secret-key!")
 
 func GenerateTokens(userID string, userIP string) (models.AuthTokens, error) {
 
@@ -41,8 +43,8 @@ func generateAccessToken(userID string, userIP string) (string, error) {
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(tokenExp)),
 		},
-		userID: userID,
-		userIP: userIP,
+		UserID: userID,
+		UserIP: userIP,
 	})
 
 	tokenString, err := token.SignedString([]byte(secretKey))
@@ -54,13 +56,8 @@ func generateAccessToken(userID string, userIP string) (string, error) {
 }
 
 func generateRefreshToken() (string, string, error) {
-	randomBytes := make([]byte, 32)
-	_, err := rand.Read(randomBytes)
-	if err != nil {
-		return "", "", err
-	}
 
-	refreshToken := base64.URLEncoding.EncodeToString(randomBytes)
+	refreshToken := base64.URLEncoding.EncodeToString(key)
 
 	hashedRefreshToken, err := bcrypt.GenerateFromPassword([]byte(refreshToken), bcrypt.DefaultCost)
 	if err != nil {
@@ -68,4 +65,30 @@ func generateRefreshToken() (string, string, error) {
 	}
 
 	return refreshToken, string(hashedRefreshToken), nil
+}
+
+func IsRefreshValid(refreshToken, hashedToken string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hashedToken), []byte(refreshToken))
+	return err == nil
+}
+
+func GetUserID(tokenString string) (string, error) {
+	claims := &Claims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (interface{}, error) {
+		return []byte(secretKey), nil
+	})
+
+	if err != nil {
+		return "", err
+	}
+
+	if !token.Valid {
+		return "", errors.New("token is not valid")
+	}
+
+	if claims.UserID == "" {
+		return "", errors.New("user ID is nil")
+	}
+
+	return claims.UserID, nil
 }
